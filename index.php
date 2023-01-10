@@ -222,7 +222,7 @@ class User extends BaseApiMethod
     {
         $response = Connector::make('user.edit', [
             'sok=ok',
-            'name=' . $login,
+            'login=' . $login,
             'elid=' . $login,
             'passwd=' . $password,
             'confirm=' . $password
@@ -239,7 +239,7 @@ class User extends BaseApiMethod
             } else {
                 return json_encode([
                     'status' => Constants::OK_STATUS,
-                    'name' => $login,
+                    'login' => $login,
                     'password' => $password,
                 ]);
             }
