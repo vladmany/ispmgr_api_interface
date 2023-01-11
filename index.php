@@ -1,6 +1,6 @@
 <?php
 
-echo User::make()->create("vasya4242", "Тестов Василий Василиевич", "amazingpassword");
+//echo User::make()->create("vasya4242", "Тестов Василий Василиевич", "amazingpassword");
 //echo User::make()->changePassword('vasya', 'betterpassword');
 
 class Constants
@@ -29,31 +29,33 @@ class Connector
     protected $func;
     protected $params;
     protected $authorize;
-    protected $authLogin;
-    protected $authPassword;
+    protected $apiUrl;
+    protected $apiLogin;
+    protected $apiPassword;
 
-    public function __construct(string $func, array $params, bool $authorize = true, ?string $authLogin = null, ?string $authPassword = null)
+    public function __construct(string $func, array $params, bool $authorize = true, ?string $apiUrl = null, ?string $apiLogin = null, ?string $apiPassword = null)
     {
         $this->func = $func;
         $this->params = $params;
         $this->authorize = $authorize;
+        $this->apiUrl = $apiUrl;
         if ($this->authorize) {
-            $this->authLogin = $authLogin;
-            $this->authPassword = $authPassword;
+            $this->apiLogin = $apiLogin;
+            $this->apiPassword = $apiPassword;
         }
     }
 
-    public static function make(string $func, array $params, bool $authorize = true, ?string $authLogin = null, ?string $authPassword = null): Connector
+    public static function make(string $func, array $params, bool $authorize = true, ?string $apiUrl = null, ?string $apiLogin = null, ?string $apiPassword = null): Connector
     {
-        return new static($func, $params, $authorize, $authLogin, $authPassword);
+        return new static($func, $params, $authorize, $apiUrl, $apiLogin, $apiPassword);
     }
 
     public function connect()
     {
-        $url = sprintf("%s/ispmgr?out=json&func=%s&%s", Constants::API_URL, $this->func, implode('&' , $this->params));
+        $url = sprintf("%s/ispmgr?out=json&func=%s&%s", $this->apiUrl, $this->func, implode('&' , $this->params));
 
         if ($this->authorize) {
-            $authKey = Auth::make($this->authLogin, $this->authPassword)->getKey();
+            $authKey = Auth::make($this->apiUrl, $this->apiLogin, $this->apiPassword)->getKey();
             if (is_array($authKey)) {
                 return $authKey; // возвращаем ошибку
             }
@@ -92,18 +94,20 @@ class Connector
 
 class Auth
 {
+    private $apiUrl;
     private $apiLogin;
     private $apiPassword;
 
-    public function __construct(?string $apiLogin, ?string $apiPassword)
+    public function __construct(?string $apiUrl, ?string $apiLogin, ?string $apiPassword)
     {
+        $this->apiUrl = $apiUrl;
         $this->apiLogin = $apiLogin;
         $this->apiPassword = $apiPassword;
     }
 
-    public static function make(?string $apiLogin, ?string $apiPassword): Auth
+    public static function make(?string $apiUrl, ?string $apiLogin, ?string $apiPassword): Auth
     {
-        return new static($apiLogin, $apiPassword);
+        return new static($apiUrl, $apiLogin, $apiPassword);
     }
 
     /**
@@ -114,7 +118,7 @@ class Auth
         $response = Connector::make('auth', [
             'username=' . $this->apiLogin,
             'password=' . $this->apiPassword
-        ], false)->connect();
+        ], false, $this->apiUrl)->connect();
 
         if(!is_array($response)) {
             $r = json_decode($response, true);
@@ -150,18 +154,20 @@ class Credentials
 
 abstract class BaseApiMethod
 {
+    protected $apiUrl;
     protected $apiLogin;
     protected $apiPassword;
 
-    public function __construct(string $apiLogin = Constants::API_PASSWORD, string $apiPassword = Constants::API_PASSWORD)
+    public function __construct(string $apiUrl = Constants::API_URL, string $apiLogin = Constants::API_PASSWORD, string $apiPassword = Constants::API_PASSWORD)
     {
+        $this->apiUrl = $apiUrl;
         $this->apiLogin = $apiLogin;
         $this->apiPassword = $apiPassword;
     }
 
-    public static function make($apiLogin = Constants::API_LOGIN, $apiPassword = Constants::API_PASSWORD): BaseApiMethod
+    public static function make($apiUrl = Constants::API_URL, $apiLogin = Constants::API_LOGIN, $apiPassword = Constants::API_PASSWORD): BaseApiMethod
     {
-        return new static($apiLogin, $apiPassword);
+        return new static($apiUrl, $apiLogin, $apiPassword);
     }
 }
 
@@ -185,7 +191,7 @@ class User extends BaseApiMethod
             'fullname=' . $name,
             'passwd=' . $password,
             'confirm=' . $password
-        ], true, $this->apiLogin, $this->apiPassword)->connect();
+        ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
 
         if (!is_array($response)) {
             $r = json_decode($response, true);
