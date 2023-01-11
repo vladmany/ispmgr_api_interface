@@ -1,7 +1,8 @@
 <?php
 
 //echo User::make()->create("vasya4242", "Тестов Василий Василиевич", "amazingpassword");
-//echo User::make()->changePassword('vasya', 'betterpassword');
+//echo User::make()->changePassword('vasya4242', 'betterpassword');
+echo DB::make()->create("myDB2", "www-root");
 
 class Constants
 {
@@ -13,6 +14,9 @@ class Constants
     /* Генерация случайного пароля */
     const PW_GEN_CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; // символы, из которых генерируется случайный пароль
     const PW_GEN_LENGTH = 12; // длинна генерируемого пароля по умолчанию
+
+    /* Базы данных */
+    const DB_DEFAULT_CHARSET = 'utf8mb4';
 
     /* Статусы ответов */
     const OK_STATUS = 'ok'; // успешное выполнение запроса
@@ -171,28 +175,18 @@ abstract class BaseApiMethod
     }
 }
 
-class User extends BaseApiMethod
+class ResponseChecker
 {
-    /**
-     * @param $login - логин
-     * @param $name - ФИО
-     * @param null $password - пароль (можно оставить пустым, пароль сгенерируется автоматически)
-     * @return bool|string
-     */
-    public function create($login, $name, $password = null)
+    public static function check($response, $okParams = [], $type = 1)
     {
-        if (!$password)
-            $password = Credentials::generatePassword();
+        switch ($type) {
+            case 1: return self::check1Type($response, $okParams);
+            case 2: return self::check2Type($response, $okParams);
+        }
+    }
 
-        $response = Connector::make('user.add.finish', [
-            'addinfo=off',
-            'sok=ok',
-            'name=' . $login,
-            'fullname=' . $name,
-            'passwd=' . $password,
-            'confirm=' . $password
-        ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
-
+    private static function check1Type($response, $okParams)
+    {
         if (!is_array($response)) {
             $r = json_decode($response, true);
 
@@ -203,11 +197,9 @@ class User extends BaseApiMethod
                         'response' => $r,
                     ]);
                 } else {
-                    return json_encode([
+                    return json_encode(array_merge([
                         'status' => Constants::OK_STATUS,
-                        'login' => $login,
-                        'password' => $password,
-                    ]);
+                    ], $okParams));
                 }
             }
         } else {
@@ -216,6 +208,54 @@ class User extends BaseApiMethod
 
         return json_encode([
             'status' => Constants::UNKNOWN_ERROR_STATUS
+        ]);
+    }
+
+    private static function check2Type($response, $okParams)
+    {
+        if (!is_array($response)) {
+            $r = json_decode($response, true);
+
+            if ($r['doc']['error']) {
+                return json_encode([
+                    'status' => Constants::API_ERROR_STATUS,
+                    'response' => $r,
+                ]);
+            } else {
+                return json_encode(array_merge([
+                    'status' => Constants::OK_STATUS,
+                ], $okParams));
+            }
+        } else {
+            return json_encode($response);
+        }
+    }
+}
+
+class User extends BaseApiMethod
+{
+    /**
+     * @param $login - логин
+     * @param $name - ФИО
+     * @param null $password - пароль (можно оставить пустым, пароль сгенерируется автоматически)
+     * @return bool|string
+     */
+    public function create($login, $name, $password = null)
+    {
+        $password = !$password ? Credentials::generatePassword() : $password;
+
+        $response = Connector::make('user.add.finish', [
+            'addinfo=off',
+            'sok=ok',
+            'name=' . $login,
+            'fullname=' . $name,
+            'passwd=' . $password,
+            'confirm=' . $password
+        ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
+
+        return ResponseChecker::check($response, [
+            'login' => $login,
+            'password' => $password
         ]);
     }
 
@@ -232,26 +272,37 @@ class User extends BaseApiMethod
             'elid=' . $login,
             'passwd=' . $password,
             'confirm=' . $password
-        ], true, $this->apiLogin, $this->apiPassword)->connect();
+        ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
 
-        if (!is_array($response)) {
-            $r = json_decode($response, true);
-
-            if ($r['doc']['error']) {
-                return json_encode([
-                    'status' => Constants::API_ERROR_STATUS,
-                    'response' => $r,
-                ]);
-            } else {
-                return json_encode([
-                    'status' => Constants::OK_STATUS,
-                    'login' => $login,
-                    'password' => $password,
-                ]);
-            }
-        } else {
-            return json_encode($response);
-        }
+        return ResponseChecker::check($response, [
+            'login' => $login,
+            'password' => $password
+        ], 2);
     }
 }
 
+class DB extends BaseApiMethod
+{
+    public function create($name, $owner, $username = null, $password = null, $charset = Constants::DB_DEFAULT_CHARSET)
+    {
+        $username = !$username ? $owner : $username;
+        $password = !$password ? Credentials::generatePassword() : $password;
+
+        $response = Connector::make('db.edit', [
+            'name=' . $name,
+            'owner=' . $owner,
+            'server=MySQL',
+            'charset=' . $charset,
+            'username=' . $username,
+            'password=' . $password,
+            'confirm=' . $password,
+            'sok=ok'
+        ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
+
+        return ResponseChecker::check($response, [
+            'db' => $name,
+            'username' => $username,
+            'password' => $password,
+        ]);
+    }
+}
