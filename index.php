@@ -2,7 +2,8 @@
 
 //echo User::make()->create("vasya4242", "Тестов Василий Василиевич", "amazingpassword");
 //echo User::make()->changePassword('vasya4242', 'betterpassword');
-echo DB::make()->create("myDB2", "www-root");
+//echo DB::make()->create("myDB2", "www-root");
+//echo Site::make()->create("testsite.test", 'www-root');
 
 class Constants
 {
@@ -303,6 +304,26 @@ class DB extends BaseApiMethod
             'db' => $name,
             'username' => $username,
             'password' => $password,
+        ]);
+    }
+}
+
+class Site extends BaseApiMethod
+{
+    public function create($name, $owner, $home = null)
+    {
+        $home = !$home ? ('www/' . $name) : $home;
+
+        $response = Connector::make('site.edit', [
+            'site_name=' . $name,
+            'site_owner=' . $owner,
+            'site_home=' . $home,
+            'sok=ok'
+        ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
+
+        return ResponseChecker::check($response, [
+            'name' => $name,
+            'home' => $home
         ]);
     }
 }
