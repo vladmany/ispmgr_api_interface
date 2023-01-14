@@ -1,10 +1,5 @@
 <?php
 
-//echo User::make()->create("vasya4242", "Тестов Василий Василиевич", "amazingpassword");
-//echo User::make()->changePassword('vasya4242', 'betterpassword');
-//echo DB::make()->create("myDB2", "www-root");
-//echo Site::make()->create("testsite.test", 'www-root');
-
 class Constants
 {
     /* Доступ к API */
@@ -75,10 +70,9 @@ class Connector
         $response = curl_exec($this->ch);
 
         if (curl_errno($this->ch)) {
-            return [
-                'status' => 'auth curl error',
-                'message' => curl_error($this->ch)
-            ];
+            $status = ($this->func == 'auth') ? Constants::AUTH_CURL_ERROR_STATUS : Constants::CURL_ERROR_STATUS;
+
+            return Response::create($status, ['message' => curl_error($this->ch)], false);
         }
 
         curl_close($this->ch);
@@ -128,13 +122,13 @@ class Auth
         if(!is_array($response)) {
             $r = json_decode($response, true);
 
-            if ($r['doc']) {
-                if ($r['doc']['error']) {
+            if (array_key_exists('doc', $r)) {
+                if (array_key_exists('error', $r['doc'])) {
                     return [
                         'status' => Constants::AUTH_API_ERROR_STATUS,
                         'response' => $r,
                     ];
-                } else if ($r['doc']['auth']) {
+                } else if (array_key_exists('auth', $r['doc'])) {
                     return $r['doc']['auth']['$id'];
                 }
             }
@@ -176,60 +170,57 @@ abstract class BaseApiMethod
     }
 }
 
-class ResponseChecker
+class Response
 {
-    public static function check($response, $okParams = [], $type = 1)
+    public static function check($response, $okParams = [], $type = 1, $encodeJSON = true)
     {
         switch ($type) {
-            case 1: return self::check1Type($response, $okParams);
-            case 2: return self::check2Type($response, $okParams);
+            case 1: return self::check1Type($response, $okParams, $encodeJSON);
+            case 2: return self::check2Type($response, $okParams, $encodeJSON);
         }
     }
 
-    private static function check1Type($response, $okParams)
+    private static function check1Type($response, $okParams, $encodeJSON)
     {
         if (!is_array($response)) {
             $r = json_decode($response, true);
 
-            if ($r['doc']) {
-                if ($r['doc']['error']) {
-                    return json_encode([
-                        'status' => Constants::API_ERROR_STATUS,
-                        'response' => $r,
-                    ]);
+            if (array_key_exists('doc', $r)) {
+                if (array_key_exists('error', $r['doc'])) {
+                    return self::create(Constants::API_ERROR_STATUS, ['response' => $r], $encodeJSON);
                 } else {
-                    return json_encode(array_merge([
-                        'status' => Constants::OK_STATUS,
-                    ], $okParams));
+                    return self::create(Constants::OK_STATUS, $okParams, $encodeJSON);
                 }
             }
         } else {
-            return json_encode($response);
+            return $response;
         }
 
-        return json_encode([
-            'status' => Constants::UNKNOWN_ERROR_STATUS
-        ]);
+        return self::create(Constants::UNKNOWN_ERROR_STATUS, [], $encodeJSON);
     }
 
-    private static function check2Type($response, $okParams)
+    private static function check2Type($response, $okParams, $encodeJSON)
     {
         if (!is_array($response)) {
             $r = json_decode($response, true);
 
-            if ($r['doc']['error']) {
-                return json_encode([
-                    'status' => Constants::API_ERROR_STATUS,
-                    'response' => $r,
-                ]);
+            if (array_key_exists('doc', $r) && array_key_exists('error', $r['doc'])) {
+                return self::create(Constants::API_ERROR_STATUS, ['response' => $r]);
             } else {
-                return json_encode(array_merge([
-                    'status' => Constants::OK_STATUS,
-                ], $okParams));
+                return self::create(Constants::OK_STATUS, $okParams);
             }
         } else {
-            return json_encode($response);
+            return $response;
         }
+    }
+
+    public static function create($status, $addParams = [], $encodeJSON = true)
+    {
+        $response = array_merge([
+            'status' => $status
+        ], $addParams);
+
+        return $encodeJSON ? json_encode($response) : $response;
     }
 }
 
@@ -254,7 +245,7 @@ class User extends BaseApiMethod
             'confirm=' . $password
         ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
 
-        return ResponseChecker::check($response, [
+        return Response::check($response, [
             'login' => $login,
             'password' => $password
         ]);
@@ -275,7 +266,7 @@ class User extends BaseApiMethod
             'confirm=' . $password
         ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
 
-        return ResponseChecker::check($response, [
+        return Response::check($response, [
             'login' => $login,
             'password' => $password
         ], 2);
@@ -300,7 +291,7 @@ class DB extends BaseApiMethod
             'sok=ok'
         ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
 
-        return ResponseChecker::check($response, [
+        return Response::check($response, [
             'db' => $name,
             'username' => $username,
             'password' => $password,
@@ -317,13 +308,64 @@ class Site extends BaseApiMethod
         $response = Connector::make('site.edit', [
             'site_name=' . $name,
             'site_owner=' . $owner,
-            'site_home=' . $home,
+            'site_home=www/' . $name . $home,
             'sok=ok'
         ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
 
-        return ResponseChecker::check($response, [
+        return Response::check($response, [
             'name' => $name,
             'home' => $home
+        ]);
+    }
+}
+
+class File extends BaseApiMethod
+{
+    public function copy($fromUser, $fromSite, $filePath, $toUser, $toSite, $toPath = '')
+    {
+        $fileName = basename($filePath);
+        $dir = str_replace($fileName, '', $filePath);
+
+        $absoluteDestPath = 'var/www/' . $toUser . '/data/www/' . $toSite . '/' . trim($toPath, '/');
+        $dirHex = bin2hex($absoluteDestPath);
+
+        $response = Connector::make('file.copyto', [
+            'elname=' . $fileName,
+            'elid=' . $fileName,
+            'plid=/var/www/' . $fromUser . '/data/www/' . $fromSite . '/' . $dir,
+            'dirlist=' . $dirHex,
+            'sok=ok'
+        ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
+
+        return Response::check($response, [
+            'path' => $absoluteDestPath . '/' . $fileName
+        ]);
+    }
+
+    public function unzip($user, $site, $filePath, $toUser = null, $toSite = null, $toPath = '')
+    {
+        $fileName = basename($filePath);
+        $dir = str_replace($fileName, '', $filePath);
+
+        $absoluteDestPath = 'var/www/';
+        if ($toUser && $toSite)
+            $absoluteDestPath .= $toUser . '/data/www/' . $toSite . '/' . trim($toPath, '/');
+        else
+            $absoluteDestPath .= $user . '/data/www/' . $site . trim($dir, '/');
+
+        $dirHex = bin2hex($absoluteDestPath);
+
+        $response = Connector::make('file.extract', [
+            'elname=' . $fileName,
+            'elid=' . $fileName,
+            'plid=/var/www/' . $user . '/data/www/' . $site . '/' . trim($dir, '/'),
+            'dirlist=' . $dirHex,
+            'newdir=',
+            'sok=ok'
+        ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
+
+        return Response::check($response, [
+            'path' => $absoluteDestPath . '/'
         ]);
     }
 }
