@@ -12,7 +12,13 @@ class Constants
     const PW_GEN_LENGTH = 12; // длинна генерируемого пароля по умолчанию
 
     /* Базы данных */
-    const DB_DEFAULT_CHARSET = 'utf8mb4';
+    const DB_DEFAULT_CHARSET = 'utf8mb4'; // стандартная кодировка БД
+
+    /* Веб пользователь */
+    const WEB_DOMAIN = 'test-isp.1t.run'; // Домен под которым будет создаваться веб пользователь
+    const WEB_ROOT_LOGIN = 'www-root'; // Пользователь с архивом WordPress
+    const WEB_ROOT_SITE = 'test.test-vm.1t.run'; // Площадка с архивом WordPress
+    const WEB_WP_ARCHIVE = 'wordpress-6.0.2-ru_RU.zip'; // Название архива WordPress
 
     /* Статусы ответов */
     const OK_STATUS = 'ok'; // успешное выполнение запроса
@@ -156,17 +162,26 @@ abstract class BaseApiMethod
     protected $apiUrl;
     protected $apiLogin;
     protected $apiPassword;
+    protected $rawResponse;
 
     public function __construct(string $apiUrl = Constants::API_URL, string $apiLogin = Constants::API_PASSWORD, string $apiPassword = Constants::API_PASSWORD)
     {
         $this->apiUrl = $apiUrl;
         $this->apiLogin = $apiLogin;
         $this->apiPassword = $apiPassword;
+        $this->rawResponse = false;
     }
 
     public static function make($apiUrl = Constants::API_URL, $apiLogin = Constants::API_LOGIN, $apiPassword = Constants::API_PASSWORD): BaseApiMethod
     {
         return new static($apiUrl, $apiLogin, $apiPassword);
+    }
+
+    public function withRawResponse()
+    {
+        $this->rawResponse = true;
+
+        return $this;
     }
 }
 
@@ -222,6 +237,17 @@ class Response
 
         return $encodeJSON ? json_encode($response) : $response;
     }
+
+    public static function statusIsError($status)
+    {
+        return in_array($status, [
+            Constants::API_ERROR_STATUS,
+            Constants::CURL_ERROR_STATUS,
+            Constants::AUTH_API_ERROR_STATUS,
+            Constants::AUTH_CURL_ERROR_STATUS,
+            Constants::UNKNOWN_ERROR_STATUS
+        ]);
+    }
 }
 
 class User extends BaseApiMethod
@@ -232,7 +258,7 @@ class User extends BaseApiMethod
      * @param null $password - пароль (можно оставить пустым, пароль сгенерируется автоматически)
      * @return bool|string
      */
-    public function create($login, $name, $password = null)
+    public function create($login, $name = null, $password = null)
     {
         $password = !$password ? Credentials::generatePassword() : $password;
 
@@ -240,7 +266,7 @@ class User extends BaseApiMethod
             'addinfo=off',
             'sok=ok',
             'name=' . $login,
-            'fullname=' . $name,
+            'fullname=' . $name ?? '',
             'passwd=' . $password,
             'confirm=' . $password
         ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
@@ -248,7 +274,7 @@ class User extends BaseApiMethod
         return Response::check($response, [
             'login' => $login,
             'password' => $password
-        ]);
+        ], 1, !$this->rawResponse);
     }
 
     /**
@@ -269,7 +295,7 @@ class User extends BaseApiMethod
         return Response::check($response, [
             'login' => $login,
             'password' => $password
-        ], 2);
+        ], 2, !$this->rawResponse);
     }
 }
 
@@ -285,6 +311,7 @@ class DB extends BaseApiMethod
             'owner=' . $owner,
             'server=MySQL',
             'charset=' . $charset,
+            'user=*',
             'username=' . $username,
             'password=' . $password,
             'confirm=' . $password,
@@ -295,13 +322,13 @@ class DB extends BaseApiMethod
             'db' => $name,
             'username' => $username,
             'password' => $password,
-        ]);
+        ], 1, !$this->rawResponse);
     }
 }
 
 class Site extends BaseApiMethod
 {
-    public function create($name, $owner, $home = null)
+    public function create($name, $owner, $home = null, $dbName = null)
     {
         $home = !$home ? ('www/' . $name) : $home;
 
@@ -309,13 +336,14 @@ class Site extends BaseApiMethod
             'site_name=' . $name,
             'site_owner=' . $owner,
             'site_home=www/' . $name . $home,
+            'lp_db_source=' . ($dbName ? ($dbName . '->MySQL') : ''),
             'sok=ok'
         ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
 
         return Response::check($response, [
             'name' => $name,
             'home' => $home
-        ]);
+        ], 1, !$this->rawResponse);
     }
 }
 
@@ -339,7 +367,7 @@ class File extends BaseApiMethod
 
         return Response::check($response, [
             'path' => $absoluteDestPath . '/' . $fileName
-        ]);
+        ], 1, !$this->rawResponse);
     }
 
     public function unzip($user, $site, $filePath, $toUser = null, $toSite = null, $toPath = '')
@@ -366,7 +394,7 @@ class File extends BaseApiMethod
 
         return Response::check($response, [
             'path' => $absoluteDestPath . '/'
-        ]);
+        ], 1, !$this->rawResponse);
     }
 
     public function changeOwner($user, $site, $path, $newOwner)
@@ -390,6 +418,70 @@ class File extends BaseApiMethod
 
         return Response::check($response, [
             'path' => $itemPath . '/' . $itemName
-        ]);
+        ], 1, !$this->rawResponse);
+    }
+}
+
+class WebUser extends BaseApiMethod
+{
+    public function create($studentId)
+    {
+        $studLogin = 'stud' . $studentId;
+
+        $userResponse = User::make($this->apiUrl, $this->apiLogin, $this->apiPassword)->withRawResponse()->create($studLogin);
+        if (Response::statusIsError($userResponse['status']))
+            return $userResponse;
+        $userLogin = $userResponse['login'];
+        $userPassword = $userResponse['password'];
+
+        $pwName = 'pw' . $studentId;
+        $pwData = $this->makeAdditions($userLogin, $pwName);
+        if (Response::statusIsError($pwData['status']))
+            return json_encode($pwData);
+
+        $iwName = 'iw' . $studentId;
+        $iwData = $this->makeAdditions($userLogin, $iwName);
+        if (Response::statusIsError($iwData['status']))
+            return json_encode($iwData);
+
+        $data = array_merge($pwData, $iwData);
+
+        unset($data['status']);
+
+        return Response::create(Constants::OK_STATUS, array_merge([
+            'username' => $userLogin,
+            'password' => $userPassword,
+        ], $data));
+    }
+
+    private function makeAdditions($userLogin, $webName)
+    {
+        $dbResponse = DB::make($this->apiUrl, $this->apiLogin, $this->apiPassword)->withRawResponse()->create($webName, $userLogin, $webName);
+        if (Response::statusIsError($dbResponse['status']))
+            return $dbResponse;
+        $db = $dbResponse['db'];
+        $dbLogin = $dbResponse['username'];
+        $dbPassword = $dbResponse['password'];
+
+        $siteName = $webName . '.' . Constants::WEB_DOMAIN;
+        $siteResponse = Site::make($this->apiUrl, $this->apiLogin, $this->apiPassword)->withRawResponse()->create($siteName, $userLogin, '/wordpress', $db);
+        if (Response::statusIsError($siteResponse['status']))
+            return $siteResponse;
+
+        $unzipResponse = File::make($this->apiUrl, $this->apiLogin, $this->apiPassword)->withRawResponse()->unzip(Constants::WEB_ROOT_LOGIN, Constants::WEB_ROOT_SITE, Constants::WEB_WP_ARCHIVE, $userLogin, $siteName);
+        if (Response::statusIsError($unzipResponse))
+            return $unzipResponse;
+
+        $changeOwnerResponse = File::make($this->apiUrl, $this->apiLogin, $this->apiPassword)->withRawResponse()->changeOwner($userLogin, $siteName, '/wordpress', $userLogin);
+        if (Response::statusIsError($changeOwnerResponse))
+            return $changeOwnerResponse;
+
+        $webPrefix = substr($webName, 0, 2);
+        return Response::create(Constants::OK_STATUS, [
+            $webPrefix . 'Db' => $db,
+            $webPrefix . 'DbUsername' => $dbLogin,
+            $webPrefix . 'DbPassword' => $dbPassword,
+            $webPrefix . 'Site' => $siteName
+        ], false);
     }
 }
