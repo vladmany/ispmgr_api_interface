@@ -368,4 +368,28 @@ class File extends BaseApiMethod
             'path' => $absoluteDestPath . '/'
         ]);
     }
+
+    public function changeOwner($user, $site, $path, $newOwner)
+    {
+        $path = trim($path, '/');
+        $pathChunks = explode('/', $path);
+        $lastIndex = count($pathChunks) - 1;
+        $itemName = $pathChunks[$lastIndex];
+        array_splice($pathChunks, $lastIndex);
+        $itemPath = '/var/www/' . $user . '/data/www/' . $site . '/' . implode('/', $pathChunks);
+
+        $response = Connector::make('file.unixattr', [
+            'elid=' . $itemName,
+            'plid=' . $itemPath,
+            'uid=' . $user,
+            'gid=' . $user,
+            'recursive=rowner',
+            'mode=644',
+            'sok=ok'
+        ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
+
+        return Response::check($response, [
+            'path' => $itemPath . '/' . $itemName
+        ]);
+    }
 }
