@@ -19,6 +19,8 @@ class Constants
     const WEB_ROOT_LOGIN = 'www-root'; // Пользователь с архивом WordPress
     const WEB_ROOT_SITE = 'test.test-vm.1t.run'; // Площадка с архивом WordPress
     const WEB_WP_ARCHIVE = 'wordpress-6.0.2-ru_RU.zip'; // Название архива WordPress
+    const WEB_USER_FIO = 'Full Name User'; // ФИО веб пользователя по умолчанию
+    const WEB_PRESET_NAME = 'listener'; // Название пресета ограничений
 
     /* Статусы ответов */
     const OK_STATUS = 'ok'; // успешное выполнение запроса
@@ -256,9 +258,10 @@ class User extends BaseApiMethod
      * @param $login - логин
      * @param $name - ФИО
      * @param null $password - пароль (можно оставить пустым, пароль сгенерируется автоматически)
+     * @param null $preset - шаблон ограничений
      * @return bool|string
      */
-    public function create($login, $name = null, $password = null)
+    public function create($login, $name = null, $password = null, $preset = null)
     {
         $password = !$password ? Credentials::generatePassword() : $password;
 
@@ -268,7 +271,8 @@ class User extends BaseApiMethod
             'name=' . $login,
             'fullname=' . $name ?? '',
             'passwd=' . $password,
-            'confirm=' . $password
+            'confirm=' . $password,
+            'preset=' . $preset ?? '',
         ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
 
         return Response::check($response, [
@@ -337,6 +341,7 @@ class Site extends BaseApiMethod
             'site_owner=' . $owner,
             'site_home=www/' . $name . $home,
             'lp_db_source=' . ($dbName ? ($dbName . '->MySQL') : ''),
+            'site_ssl_cert=letsencrypt',
             'sok=ok'
         ], true, $this->apiUrl, $this->apiLogin, $this->apiPassword)->connect();
 
@@ -426,9 +431,9 @@ class WebUser extends BaseApiMethod
 {
     public function create($studentId)
     {
-        $studLogin = 'stud' . $studentId;
+        $studLogin = 'user' . $studentId;
 
-        $userResponse = User::make($this->apiUrl, $this->apiLogin, $this->apiPassword)->withRawResponse()->create($studLogin);
+        $userResponse = User::make($this->apiUrl, $this->apiLogin, $this->apiPassword)->withRawResponse()->create($studLogin, Constants::WEB_USER_FIO, null, Constants::WEB_PRESET_NAME);
         if (Response::statusIsError($userResponse['status']))
             return $userResponse;
         $userLogin = $userResponse['login'];
